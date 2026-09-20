@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>见室排版</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">见室排版 <span>· 公众号助手</span></div>
+    <div class="top-actions">
+      <button id="modeToggle" class="ghost" title="切换 富文本 / Markdown">⊞ MD</button>
+      <button id="saveDraft" class="ghost" title="保存草稿">💾</button>
+    </div>
+  </header>
+
+  <section class="tpl-tools">
+    <button id="favFilter" class="fav-filter" title="只看收藏">★ 收藏</button>
+    <span class="tpl-hint">点击模板切换风格 · 点 ★ 收藏</span>
+  </section>
+  <section class="templates" id="templateGallery"></section>
+
+  <!-- 富文本模式 -->
+  <div id="richPane">
+    <div class="toolbar" id="toolbar">
+      <button data-cmd="h1" title="标题1">H1</button>
+      <button data-cmd="h2" title="标题2">H2</button>
+      <button data-cmd="h3" title="标题3">H3</button>
+      <button data-cmd="p" title="正文">¶</button>
+      <span class="sep"></span>
+      <button data-cmd="bold" title="加粗"><b>B</b></button>
+      <button data-cmd="italic" title="斜体"><i>I</i></button>
+      <button data-cmd="quote" title="引用">❝</button>
+      <button data-cmd="ul" title="无序列表">•</button>
+      <button data-cmd="ol" title="有序列表">1.</button>
+      <button data-cmd="code" title="代码块（自动高亮）">{ }</button>
+      <button data-cmd="icode" title="行内代码">&lt;/&gt;</button>
+      <button data-cmd="hr" title="分割线">―</button>
+      <button data-cmd="img" title="插入图片">🖼</button>
+      <button data-cmd="grid" title="多图网格">▦</button>
+      <span class="sep"></span>
+      <button data-cmd="undo" title="撤销">↶</button>
+      <button data-cmd="clear" title="清除格式">⌫</button>
+    </div>
+    <div class="editor-wrap">
+      <div id="editor" class="editor" contenteditable="true" spellcheck="false"></div>
+    </div>
+  </div>
+
+  <!-- Markdown 模式 -->
+  <div id="mdPane" style="display:none">
+    <div class="md-label">Markdown 源码</div>
+    <textarea id="mdSource" class="md-source" spellcheck="false" placeholder="# 标题&#10;&#10;在这里用 Markdown 写作…"></textarea>
+    <div class="md-label">实时预览（随主题变化）</div>
+    <div class="editor-wrap">
+      <div id="mdPreview" class="editor md-preview"></div>
+    </div>
+  </div>
+
+  <footer class="actions">
+    <button id="expWechat" class="primary">📋 复制富文本(公众号)</button>
+    <button id="expWechatTab" class="primary outline">⬇ 一键导入公众号</button>
+    <div class="row">
+      <button id="expMd" class="secondary">📝 复制 Markdown</button>
+      <button id="expMdFile" class="secondary">⬇ 下载 .md</button>
+    </div>
+    <div class="row">
+      <button id="expHtml" class="secondary">💾 下载 HTML</button>
+      <button id="impMd" class="secondary">📂 导入 .md</button>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="export-note">
+      复制到公众号：粘贴到编辑器中即可；Markdown 可直接粘贴进 Notion / FlowUs。
+    </div>
+  </footer>
+
+  <input type="file" id="imgFile" accept="image/*" style="display:none" />
+  <input type="file" id="gridFile" accept="image/*" multiple style="display:none" />
+  <input type="file" id="mdFile" accept=".md,.markdown,.txt,text/markdown,text/plain" style="display:none" />
+
+  <!-- 多图网格列数选择弹窗 -->
+  <div id="gridModal" class="modal" style="display:none">
+    <div class="modal-box">
+      <div class="modal-title">多图网格 · 选择列数</div>
+      <div class="modal-row">
+        <button data-cols="2">2 列</button>
+        <button data-cols="3">3 列</button>
+      </div>
+      <button class="modal-cancel" data-cols="0">取消</button>
+    </div>
+  </div>
+
+  <script src="js/templates.js"></script>
+  <script src="js/exporters.js"></script>
+  <script src="js/images.js"></script>
+  <script src="js/highlight.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/markdown.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
