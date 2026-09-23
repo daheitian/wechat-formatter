@@ -10,6 +10,7 @@
   const STORE = "images";
   let dbPromise = null;
   const objUrlCache = {}; // id -> objectURL（仅本会话显示用）
+  const memCache = {};    // id -> base64 dataURL（IndexedDB 不可用时的导出/显示兜底，如 file:// 预览）
 
   function openDB() {
     if (dbPromise) return dbPromise;
@@ -113,16 +114,23 @@
   async function getObjectURL(id) {
     if (objUrlCache[id]) return objUrlCache[id];
     const rec = await idbGet(id);
-    if (!rec) return null;
-    const u = URL.createObjectURL(rec.blob);
-    objUrlCache[id] = u;
-    return u;
+    if (rec) {
+      const u = URL.createObjectURL(rec.blob);
+      objUrlCache[id] = u;
+      return u;
+    }
+    // IndexedDB 不可用（如 file:// 网页预览）时，退回内存中的 base64 dataURL 直接当 src 用
+    if (memCache[id]) return memCache[id];
+    return null;
   }
 
   async function toDataURL(id) {
+    if (memCache[id]) return memCache[id];
     const rec = await idbGet(id);
     if (!rec) return null;
-    return blobToDataURL(rec.blob);
+    const du = await blobToDataURL(rec.blob);
+    if (du) memCache[id] = du;
+    return du;
   }
 
   // 把元素内所有 data-imgid / img:// 的图片解析为可显示的 objectURL（加载草稿 / 预览时用）
