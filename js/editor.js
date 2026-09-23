@@ -93,6 +93,191 @@ function sanitizeHtml(html) {
   }).join("");
 }
 
+// ---------- 纯文本 → 语义结构（无 HTML 时的自动排版）----------
+// 只识别明确语法标记，避免把普通短句误判成标题；无标记的纯散文退回普通段落。
+function autoStructure(text) {
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let para = [];   // 累积普通段落行
+  let quote = [];  // 累积引用行
+  let ul = [];     // 无序列表
+  let ol = [];     // 有序列表
+  let code = null; // 代码块累积（null 表示不在代码块）
+
+  function flushPara() {
+    if (para.length) { out.push("<p>" + para.map(escHtml).join("<br/>") + "</p>"); para = []; }
+  }
+  function flushQuote() {
+    if (quote.length) { out.push("<blockquote>" + quote.map(escHtml).join("<br/>") + "</blockquote>"); quote = []; }
+  }
+  function flushList() {
+    if (ul.length) { out.push("<ul>" + ul.map((i) => "<li>" + escHtml(i) + "</li>").join("") + "</ul>"); ul = []; }
+    if (ol.length) { out.push("<ol>" + ol.map((i) => "<li>" + escHtml(i) + "</li>").join("") + "</ol>"); ol = []; }
+  }
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    const fence = line.match(/^```(.*)$/);
+    if (fence) {
+      if (code === null) { flushPara(); flushQuote(); flushList(); code = []; }
+      else { out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>"); code = null; }
+      continue;
+    }
+    if (code !== null) { code.push(raw); continue; }
+    if (!line.trim()) { flushPara(); flushQuote(); flushList(); continue; }
+
+    let m;
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+      flushPara(); flushQuote(); flushList();
+      const lvl = Math.min(m[1].length, 4);
+      out.push("<h" + lvl + ">" + escHtml(m[2].trim()) + "</h" + lvl + ">");
+      continue;
+    }
+    if ((m = line.match(/^[>》]\s?(.*)$/))) {
+      flushPara(); flushList(); quote.push(m[1].trim()); continue;
+    }
+    if ((m = line.match(/^[-*+]\s+(.*)$/))) {
+      flushPara(); flushQuote(); ul.push(m[1].trim()); continue;
+    }
+    if ((m = line.match(/^\d+\.\s+(.*)$/))) {
+      flushPara(); flushQuote(); ol.push(m[1].trim()); continue;
+    }
+    flushQuote(); flushList();
+    para.push(line.trim());
+  }
+  if (code !== null) out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>");
+  flushPara(); flushQuote(); flushList();
+  return out.join("");
+}
+
+// ---------- 启发式排版：无标记中文散文 → 语义 HTML（自动识别标题/引用/列表/段落）----------
+// 仅在纯文本且没有显式 Markdown 标记时启用；有标记走保守的 autoStructure。
+function hasExplicitMarkup(text) {
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^#{1,6}\s/.test(line)) return true;        // # 标题
+    if (/^[>》]\s/.test(line)) return true;          // > 引用
+    if (/^[-*+]\s+/.test(line)) return true;         // - 列表
+    if (/^\d+\.\s+/.test(line)) return true;         // 1. 列表
+    if (/^```/.test(line)) return true;              // 代码围栏
+  }
+  return false;
+}
+
+// ---------- 无换行长文（"一整坨"）→ 按句子切块分段 ----------
+// 播客逐字稿 / 聊天记录粘贴时换行常丢失，整篇糊成一段；按中英文句末标点切块成可读段落。
+function smartParagraphText(text) {
+  const t = (text || "").replace(/\r\n/g, "\n").trim();
+  const newlineCount = (t.match(/\n/g) || []).length;
+  if (newlineCount >= 2 || t.length < 300) return t; // 已有换行结构或太短，不动
+  const sentences = t.match(/[^。！？!?…]*[。！？!?…]+["”』」）)]*|[^。！？!?…]+$/g) || [t];
+  const paras = [];
+  let buf = "";
+  for (const s of sentences) {
+    if (buf && (buf + s).length > 110) { paras.push(buf); buf = s; }
+    else buf += s;
+  }
+  if (buf.trim()) paras.push(buf);
+  return paras.join("\n\n");
+}
+
+function smartStructure(text) {
+  const lines = smartParagraphText(text).split("\n");
+  const out = [];
+  let para = [];          // 普通正文行累积
+  let quote = [];         // 引用累积
+  let ul = [];            // 无序列表
+  let ol = [];            // 有序列表
+  let code = null;        // 代码块累积
+  let headingCount = 0;   // 第 1 个标题用 h1，其余 h2
+
+  const n = lines.length;
+  const emptyCount = lines.filter((l) => !l.trim()).length;
+  // 若全文几乎无空行（<5%），则逐行分段，避免一整坨合成一段
+  const linePerPara = emptyCount / n < 0.05 && n > 5;
+
+  function flushPara() { if (para.length) { out.push("<p>" + para.map(escHtml).join("<br/>") + "</p>"); para = []; } }
+  function flushQuote() { if (quote.length) { out.push("<blockquote>" + quote.map(escHtml).join("<br/>") + "</blockquote>"); quote = []; } }
+  function flushList() {
+    if (ul.length) { out.push("<ul>" + ul.map((i) => "<li>" + escHtml(i) + "</li>").join("") + "</ul>"); ul = []; }
+    if (ol.length) { out.push("<ol>" + ol.map((i) => "<li>" + escHtml(i) + "</li>").join("") + "</ol>"); ol = []; }
+  }
+  function headingStrong(t) {
+    return /^(第[一二三四五六七八九十百千0-9]+[章回节部分篇卷集]|序章|前言|引言|导语|结语|后记|附录|目录|摘要|概要|序|跋|导读|编者按)/.test(t)
+      || /^[一二三四五六七八九十百千]+[、.．]/.test(t)   // 一、二、
+      || /^（[一二三四五六七八九十]+）/.test(t)          // （一）
+      || /^[A-Za-z][.、]/.test(t);                       // A. B、
+  }
+  function isListLine(t) {
+    let m;
+    if ((m = t.match(/^([0-9]+)[.、．）)]\s+/))) return { ol: true, rest: t.slice(m[0].length) };
+    if ((m = t.match(/^[（(][0-9]+[)）]\s+/))) return { ol: true, rest: t.slice(m[0].length) };
+    if ((m = t.match(/^([•·●○◆▪▫⚫\-*+])\s+/))) return { ol: false, rest: t.slice(m[0].length) };
+    return null;
+  }
+  function isQuoteLine(t) {
+    return /^["“”「『][\s\S]*["”」』]$/.test(t) && t.length > 2;
+  }
+
+  for (let i = 0; i < n; i++) {
+    const raw = lines[i];
+    const t = raw.trim();
+    if (code !== null) {
+      if (/^```/.test(t)) { out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>"); code = null; }
+      else code.push(raw);
+      continue;
+    }
+    if (/^```/.test(t)) { flushPara(); flushQuote(); flushList(); code = []; continue; }
+    if (!t) { flushPara(); flushQuote(); flushList(); continue; }
+
+    const lm = isListLine(t);
+    if (lm) { flushPara(); flushQuote(); (lm.ol ? ol : ul).push(lm.rest); continue; }
+    if (isQuoteLine(t)) { flushPara(); flushList(); quote.push(t.slice(1, -1).trim()); continue; }
+
+    // 标题候选：短行（2–30 字）、不以句末标点结尾
+    const len = t.length;
+    if (len >= 2 && len <= 30 && !"。，；：…".includes(t[len - 1])) {
+      const prevEmpty = i === 0 || !lines[i - 1].trim();
+      const nextRaw = i + 1 < n ? lines[i + 1] : "";
+      const nextEmpty = !nextRaw.trim();
+      const nextLong = nextRaw.trim().length > len * 1.6 && nextRaw.trim().length >= 18;
+      if (headingStrong(t) || (prevEmpty && (nextEmpty || nextLong))) {
+        flushPara(); flushQuote(); flushList();
+        // 中文序号小节标题（一、二、 / （一））恒为 h2；其余首个标题为 h1
+        const isCnOrdinal = /^[一二三四五六七八九十百千]+[、.．]/.test(t) || /^（[一二三四五六七八九十]+）/.test(t);
+        const tag = isCnOrdinal ? "h2" : (headingCount === 0 ? "h1" : "h2");
+        headingCount++;
+        out.push("<" + tag + ">" + escHtml(t) + "</" + tag + ">");
+        continue;
+      }
+    }
+
+    flushQuote(); flushList();
+    if (linePerPara) out.push("<p>" + escHtml(t) + "</p>");
+    else para.push(t);
+  }
+  if (code !== null) out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>");
+  flushPara(); flushQuote(); flushList();
+  return out.join("");
+}
+
+// ---------- 判断净化后的 HTML 是否"毫无结构"（无标题/列表/引用/代码/表格/图片）----------
+// 无结构长文（如逐字稿粘贴）应自动走智能排版而不是糊成一坨段落。
+function isStructurelessHtml(html) {
+  try {
+    const doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
+    const root = doc.body.firstChild;
+    if (!root) return { structureless: false, text: "" };
+    const hasStructure = root.querySelector("h1,h2,h3,h4,h5,h6,ul,ol,blockquote,pre,table,img,hr");
+    root.querySelectorAll("br").forEach((b) => b.parentNode.replaceChild(doc.createTextNode("\n"), b));
+    return { structureless: !hasStructure, text: root.textContent || "" };
+  } catch (e) {
+    return { structureless: false, text: "" };
+  }
+}
+
 const Editor = {
   el: null,
 
@@ -109,13 +294,25 @@ const Editor = {
       const html = cd.getData("text/html");
       const text = cd.getData("text/plain");
       if (html && html.trim()) {
-        const clean = sanitizeHtml(html);
+        let clean = sanitizeHtml(html);
+        // 无结构长文（无任何标题/列表/引用/代码/表格/图片）→ 自动智能排版
+        const chk = isStructurelessHtml(clean);
+        if (chk.structureless && chk.text.replace(/\s/g, "").length > 150) {
+          clean = smartStructure(chk.text);
+        }
         exec("insertHTML", clean);
         if (window.Highlighter) window.Highlighter.highlightContainers(this.el, window.__currentDark);
         if (window.ImagePipeline) window.ImagePipeline.hydrateImages(this.el);
       } else if (text && text.trim()) {
-        const para = text.trim().split(/\n{2,}/).map((p) => "<p>" + escHtml(p).replace(/\n/g, "<br/>") + "</p>").join("");
-        exec("insertHTML", para);
+        let structured;
+        if (window.hasExplicitMarkup && window.hasExplicitMarkup(text)) {
+          structured = window.autoStructure(text);
+        } else {
+          structured = window.smartStructure
+            ? window.smartStructure(text)
+            : text.trim().split(/\n{2,}/).map((p) => "<p>" + escHtml(p).replace(/\n/g, "<br/>") + "</p>").join("");
+        }
+        exec("insertHTML", structured);
       }
     });
   },
@@ -231,4 +428,9 @@ const Editor = {
 if (typeof window !== "undefined") {
   window.Editor = Editor;
   window.sanitizeHtml = sanitizeHtml;
+  window.autoStructure = autoStructure;
+  window.smartStructure = smartStructure;
+  window.hasExplicitMarkup = hasExplicitMarkup;
+  window.smartParagraphText = smartParagraphText;
+  window.isStructurelessHtml = isStructurelessHtml;
 }
