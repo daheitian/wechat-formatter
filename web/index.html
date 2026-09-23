@@ -12,6 +12,7 @@
     <div class="brand">见室排版 <span>· 公众号 / Notion / FlowUs</span></div>
     <div class="appbar-right">
       <div class="seg" id="modeSeg">
+        <button class="seg-btn" data-mode="write" title="专注写作：无干扰 + 聚焦当前段">✍️ 写作</button>
         <button class="seg-btn active" data-mode="rich">富文本</button>
         <button class="seg-btn" data-mode="md">Markdown</button>
       </div>
@@ -49,6 +50,7 @@
           <button data-cmd="hr" title="分割线">―</button>
           <button data-cmd="img" title="插入图片">🖼</button>
           <button data-cmd="grid" title="多图网格">▦</button>
+          <button data-cmd="smart" title="智能排版：自动识别标题/引用/列表/段落">🪄</button>
           <span class="sep"></span>
           <button data-cmd="undo" title="撤销">↶</button>
           <button data-cmd="clear" title="清除格式">⌫</button>
@@ -56,6 +58,21 @@
         <div class="editor-wrap">
           <div id="editor" class="editor" contenteditable="true" spellcheck="false"></div>
         </div>
+        <!-- 写作模式：右侧并排实时预览（手机宽度，随输入重渲染，可同步滚动） -->
+        <aside id="writePreview" class="wpane">
+          <div class="wpane-head">
+            <span class="wpane-dot"></span>
+            <span class="wpane-tpl" id="wpaneTpl">当前模板</span>
+            <span class="wpane-grow"></span>
+            <label class="wpane-sync" title="编辑区滚动时按比例带动预览滚动">
+              <input type="checkbox" id="wpaneSync" checked />同步
+            </label>
+            <button class="wpane-x" id="wpaneClose" title="收起预览（Alt+P）">✕</button>
+          </div>
+          <div class="wpane-body">
+            <div class="wpane-sheet"><div class="wpane-canvas" id="wpaneCanvas"></div></div>
+          </div>
+        </aside>
       </div>
 
       <!-- Markdown 模式：源码 + 预览 -->
@@ -77,13 +94,69 @@
       <!-- 底部导出栏 -->
       <footer class="footbar glass">
         <button id="expWechat" class="primary">📋 复制富文本</button>
+        <span class="copy-cap">排版后点此复制 → 去公众号后台 Ctrl+V</span>
         <button id="expMd" class="secondary">📝 复制 Markdown</button>
         <button id="expHtml" class="secondary">💾 下载 HTML</button>
         <button id="expMdFile" class="secondary">⬇ 下载 .md</button>
         <button id="impMd" class="secondary">📂 导入 .md</button>
+        <button id="justifyBtn" class="secondary justify-toggle" aria-pressed="true" title="两端对齐：正文 / 列表 / 引用左右齐平（所有模板统一）。点按可关闭，改回各模板自身设计">≣ 两端对齐</button>
+        <button id="openPreview" class="secondary preview-btn">📱 预览 &amp; 自检</button>
+        <button id="restoreBtn" class="secondary restore" style="display:none" title="撤销智能排版，还原排版前的原文">↩ 还原原文</button>
         <span class="hint" id="hint"></span>
       </footer>
     </section>
+  </div>
+
+  <!-- 写作模式底部浮动工具坞（仅写作模式可见）：聚焦 / 打字机 / 风格检查 / 字数 / 预览 -->
+  <div id="writeDock">
+    <div class="wc-group" role="group" aria-label="聚焦模式">
+      <span class="wc-label">聚焦</span>
+      <button class="wc-btn wc-focus" data-focus="off">关</button>
+      <button class="wc-btn wc-focus active" data-focus="paragraph">段落</button>
+      <button class="wc-btn wc-focus" data-focus="sentence">句</button>
+    </div>
+    <span class="wc-sep"></span>
+    <button class="wc-btn wc-toggle" id="typewriterBtn" title="打字机滚动：当前行始终居中（Alt+T 快捷开关）">⌨ 打字机</button>
+    <button class="wc-btn wc-toggle" id="styleCheckBtn" title="风格检查：标出填充词 / 冗余 / 陈词（仅编辑器内可见，不进导出）">✓ 风格</button>
+    <button class="wc-btn wc-toggle" id="appearanceBtn" title="写作外观：字体 / 字号 / 行高 / 栏宽 / 主题">🎨 外观</button>
+    <button class="wc-btn wc-toggle" id="wpaneBtn" title="并排实时预览：边写边看最终渲染（Alt+P）">▥ 并排</button>
+    <button class="wc-btn wc-toggle" id="dockJustify" title="两端对齐：正文 / 列表 / 引用左右齐平（所有模板统一）。点按可关闭，改回各模板自身设计">≣ 两端</button>
+    <span class="wc-sep"></span>
+    <span class="st-main" id="stMain">0 字</span>
+    <div class="st-detail" id="stDetail"></div>
+    <span class="wc-sep"></span>
+    <button class="wc-btn wc-preview" id="dockPreview" title="手机预览 &amp; 发布前自检（写作模式专用入口）">📱 预览</button>
+    <button class="wc-btn" id="dockMd" title="Markdown 语法速查">? MD</button>
+  </div>
+
+  <!-- Markdown 语法速查浮层（写作模式） -->
+  <div id="mdHelp" class="md-help" style="display:none">
+    <div class="md-help-head">
+      <span>Markdown 速查</span>
+      <button id="mdHelpClose" title="关闭">✕</button>
+    </div>
+    <div class="md-help-grid">
+      <div class="md-help-row"><code># 标题</code><span>H1–H6，井号数量定级</span></div>
+      <div class="md-help-row"><code>**加粗**</code><span>或用 __加粗__</span></div>
+      <div class="md-help-row"><code>*斜体*</code><span>或用 _斜体_</span></div>
+      <div class="md-help-row"><code>***粗斜***</code><span>三个星号</span></div>
+      <div class="md-help-row"><code>~~删除~~</code><span>删除线</span></div>
+      <div class="md-help-row"><code>==高亮==</code><span>高亮标记</span></div>
+      <div class="md-help-row"><code>`代码`</code><span>行内代码</span></div>
+      <div class="md-help-row"><code>```js</code><span>围栏代码块（可带语言）</span></div>
+      <div class="md-help-row"><code>- 项</code><span>无序列表（* + 同效）</span></div>
+      <div class="md-help-row"><code>1. 项</code><span>有序列表</span></div>
+      <div class="md-help-row"><code>- [ ] 待办</code><span>- [x] 已完成</span></div>
+      <div class="md-help-row"><code>&gt; 引用</code><span>&gt;&gt; 嵌套引用</span></div>
+      <div class="md-help-row"><code>[文字](url)</code><span>链接</span></div>
+      <div class="md-help-row"><code>![说明](url)</code><span>图片</span></div>
+      <div class="md-help-row"><code>---</code><span>分割线（*** ___ 亦可）</span></div>
+      <div class="md-help-row"><code>+++</code><span>分页符</span></div>
+      <div class="md-help-row"><code>^上标^</code><span>上标</span></div>
+      <div class="md-help-row"><code>~下标~</code><span>下标</span></div>
+      <div class="md-help-row"><code>|a|b|</code><span>表格（Markdown 模式预览）</span></div>
+    </div>
+    <div class="md-help-foot">闭合定界符即渲染 · Enter 退出代码块 / 续列表 · 可随时切到 Markdown 模式查看源码</div>
   </div>
 
   <input type="file" id="imgFile" accept="image/*" style="display:none" />
@@ -102,6 +175,125 @@
     </div>
   </div>
 
+  <!-- 手机预览 + 发布前自检 -->
+  <div id="previewModal" class="modal" style="display:none">
+    <div class="pv-box">
+      <header class="pv-head">
+        <div class="pv-brand">
+          <span class="pv-glyph" aria-hidden="true">📱</span>
+          <span class="pv-titles">
+            <b class="pv-title">手机预览</b>
+            <em class="pv-sub"><span id="previewTplName">当前模板</span> · 微信正文渲染</em>
+          </span>
+        </div>
+        <div class="pv-head-r">
+          <span class="pv-size">375 × 812</span>
+          <button class="pv-close" id="previewClose" title="关闭（Esc）">✕</button>
+        </div>
+      </header>
+      <div class="pv-body">
+        <div class="pv-stage">
+          <div class="phone-wrap">
+            <span class="phone-key phone-key-power"></span>
+            <span class="phone-key phone-key-mute"></span>
+            <span class="phone-key phone-key-vol"></span>
+            <div class="phone">
+              <div class="phone-screen" id="phoneScreen"></div>
+              <div class="phone-ui" aria-hidden="true">
+                <div class="phone-chrome">
+                  <div class="phone-status">
+                    <span class="ps-time">9:41</span>
+                    <span class="ps-icons">
+                      <span class="ps-bars"><i></i><i></i><i></i></span>
+                      <span class="ps-batt"><i></i></span>
+                    </span>
+                  </div>
+                  <div class="phone-nav">
+                    <span class="pn-back">‹</span>
+                    <span class="pn-dots">⋯</span>
+                  </div>
+                </div>
+                <div class="phone-island"></div>
+              </div>
+            </div>
+          </div>
+          <div class="pv-tip">滚动查看全文 · 与手机端一致</div>
+        </div>
+        <aside class="pv-side">
+          <div class="pv-side-head">
+            <b>发布前自检</b>
+            <em>微信渲染口径</em>
+          </div>
+          <div class="check-panel" id="checkPanel"></div>
+          <div class="pv-side-foot">
+            <button class="pv-act pv-act-primary" id="pvCopy">复制到公众号</button>
+            <button class="pv-act" id="pvDownload">下载 HTML</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- 写作外观面板（对应 iA Writer 的 Modify Preview：字体 / 字号 / 行高 / 栏宽 / 主题） -->
+  <div id="writeLook" class="wlook" style="display:none">
+    <div class="wlook-head">
+      <span>写作外观</span>
+      <button id="writeLookClose" title="关闭">✕</button>
+    </div>
+    <div class="wlook-row">
+      <span class="wlook-label">字体</span>
+      <div class="wlook-seg" id="wlFont">
+        <button data-v="mono" class="active">等宽</button>
+        <button data-v="serif">衬线</button>
+        <button data-v="sans">无衬线</button>
+      </div>
+    </div>
+    <div class="wlook-row">
+      <span class="wlook-label">主题</span>
+      <div class="wlook-seg" id="wlTheme">
+        <button data-v="paper" class="active">纸</button>
+        <button data-v="white">白</button>
+        <button data-v="night">夜</button>
+      </div>
+    </div>
+    <div class="wlook-row">
+      <span class="wlook-label">字号</span>
+      <input type="range" id="wlSize" min="15" max="26" step="1" value="19" />
+      <output id="wlSizeOut">19</output>
+    </div>
+    <div class="wlook-row">
+      <span class="wlook-label">行高</span>
+      <input type="range" id="wlLh" min="1.4" max="2.4" step="0.05" value="1.95" />
+      <output id="wlLhOut">1.95</output>
+    </div>
+    <div class="wlook-row">
+      <span class="wlook-label">栏宽</span>
+      <input type="range" id="wlCol" min="520" max="900" step="10" value="720" />
+      <output id="wlColOut">720</output>
+    </div>
+    <div class="wlook-foot">
+      <button id="wlReset">恢复默认</button>
+      <span class="wlook-tip">只改写作画布，不动导出成品</span>
+    </div>
+  </div>
+
+  <!-- 编辑器右键菜单：为写作而生（行内 / 块级 / 插入 / 复制） -->
+  <div id="ctxMenu" class="ctx" style="display:none"></div>
+
+  <!-- 右键菜单的二级：插入链接 -->
+  <div id="ctxLink" class="ctx ctx-form" style="display:none">
+    <div class="ctx-form-title">插入链接</div>
+    <input id="ctxLinkText" type="text" placeholder="链接文字" />
+    <input id="ctxLinkUrl" type="text" placeholder="https://" />
+    <div class="ctx-form-foot">
+      <button id="ctxLinkOk" class="ctx-primary">插入</button>
+      <button id="ctxLinkCancel">取消</button>
+    </div>
+  </div>
+
+  <!-- 复制等操作提示 toast -->
+  <div class="toast" id="toast" style="display:none"></div>
+
   <!-- 引擎（与扩展共用同一套，零重复） -->
   <script src="../js/templates.js"></script>
   <script src="../js/exporters.js"></script>
@@ -109,6 +301,7 @@
   <script src="../js/highlight.js"></script>
   <script src="../js/editor.js"></script>
   <script src="../js/markdown.js"></script>
+  <script src="../js/compat.js"></script>
   <script src="web-app.js"></script>
 </body>
 </html>
