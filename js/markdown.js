@@ -24,11 +24,21 @@ function _inline(text) {
   text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, t, url) {
     return '<a href="' + url + '">' + t + "</a>";
   });
-  // 4) 粗体
+  // 4) 粗斜体（三星号 / 三下划线）—— 必须先于粗体 / 斜体
+  text = text.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>")
+             .replace(/___([^_]+)___/g, "<strong><em>$1</em></strong>");
+  // 5) 删除线
+  text = text.replace(/~~([^~]+)~~/g, "<s>$1</s>");
+  // 6) 高亮
+  text = text.replace(/==([^=]+)==/g, "<mark>$1</mark>");
+  // 7) 粗体
   text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  // 5) 斜体
+  // 8) 斜体
   text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/(^|[^_])_([^_]+)_(?!_)/g, "$1<em>$2</em>");
-  // 6) 还原行内代码
+  // 9) 上标 / 下标（单 ~ 须在 ~~ 之后，避免误吃删除线）
+  text = text.replace(/\^([^\s^]+)\^/g, "<sup>$1</sup>");
+  text = text.replace(/~([^\s~]+)~/g, "<sub>$1</sub>");
+  // 10) 还原行内代码
   text = text.replace(/@@(\d+)@@/g, function (m, i) {
     return "<code>" + codes[+i] + "</code>";
   });
@@ -41,6 +51,14 @@ function _splitRow(line) {
   if (s.charAt(s.length - 1) === "|") s = s.slice(0, -1);
   return s.split("|").map(function (c) { return c.trim(); });
 }
+
+// 分割线：--- / *** / ___ ，允许中间夹空格（* * *）
+function _isHr(s) {
+  return /^\s*(?:-\s*){3,}$/.test(s) || /^\s*(?:\*\s*){3,}$/.test(s) || /^\s*(?:_\s*){3,}$/.test(s);
+}
+
+// 任务列表：- [ ] / - [x] / 1. [ ] …
+var _TASK_RE = /^\s*([-*+]|\d+\.)\s+\[([ xX])\]\s+(.*)$/;
 
 function markdownToHtml(md) {
   var lines = (md || "").replace(/\r\n?/g, "\n").split("\n");
@@ -61,7 +79,8 @@ function markdownToHtml(md) {
       var buf = [];
       while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
       i++;
-      html += "<pre><code>" + _esc(buf.join("\n")) + "</code></pre>";
+      var langAttr = fence[1] ? ' class="language-' + fence[1] + '"' : "";
+      html += "<pre><code" + langAttr + ">" + _esc(buf.join("\n")) + "</code></pre>";
       continue;
     }
 
@@ -76,14 +95,34 @@ function markdownToHtml(md) {
       i++; continue;
     }
 
-    // 分割线
-    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { html += "<hr/>"; i++; continue; }
+    // 分页符
+    if (/^\s*\+\+\+\s*$/.test(line)) { html += '<hr class="page-break"/>'; i++; continue; }
+
+    // 分割线（--- / *** / ___ / * * * …）
+    if (_isHr(line)) { html += "<hr/>"; i++; continue; }
 
     // 引用
     if (/^>\s?/.test(line)) {
       var q = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) { q.push(lines[i].replace(/^>\s?/, "")); i++; }
       html += "<blockquote>" + _inline(_esc(q.join(" "))) + "</blockquote>";
+      continue;
+    }
+
+    // 任务列表
+    if (_TASK_RE.test(line)) {
+      var tasks = [];
+      while (i < lines.length) {
+        var tm = lines[i].match(_TASK_RE);
+        if (!tm) break;
+        tasks.push({ checked: tm[2].toLowerCase() === "x", text: tm[3] });
+        i++;
+      }
+      html += '<ul class="task-list">' + tasks.map(function (it) {
+        return '<li class="task" data-checked="' + it.checked + '">' +
+          '<span class="task-box">' + (it.checked ? "☑" : "☐") + "</span>" +
+          _inline(_esc(it.text)) + "</li>";
+      }).join("") + "</ul>";
       continue;
     }
 
@@ -136,14 +175,15 @@ function markdownToHtml(md) {
       !/^(#{1,6})\s/.test(lines[i]) &&
       !/^>\s?/.test(lines[i]) &&
       !/^```/.test(lines[i]) &&
-      !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]) &&
+      !/^\s*\+\+\+\s*$/.test(lines[i]) &&
+      !_isHr(lines[i]) &&
       !/^\s*([\-*+])\s+/.test(lines[i]) &&
       !/^\s*\d+\.\s+/.test(lines[i]) &&
       !(lines[i].indexOf("|") !== -1 && i + 1 < lines.length && isTableSep(lines[i + 1]))
     ) {
       para.push(lines[i]); i++;
     }
-    if (para.length) html += "<p>" + _inline(_esc(para.join(" "))) + "</p>";
+    if (para.length) html += "<p>" + para.map(function (l) { return _inline(_esc(l)); }).join("<br/>") + "</p>";
   }
 
   return html;
