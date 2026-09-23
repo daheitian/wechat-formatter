@@ -50,16 +50,23 @@ async function copyRichHtml(html) {
       return { ok: true, mode: "rich" };
     }
   } catch (e) {}
-  // 回退：execCommand
+  // 回退：用 contenteditable 承载富文本再 execCommand（file:// 等非安全上下文也能复制出真正的富文本）
   try {
-    const ta = document.createElement("textarea");
-    ta.value = html;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
+    const div = document.createElement("div");
+    div.contentEditable = "true";
+    div.style.position = "fixed";
+    div.style.left = "-9999px";
+    div.style.top = "0";
+    div.innerHTML = html;
+    document.body.appendChild(div);
+    const range = document.createRange();
+    range.selectNodeContents(div);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
     document.execCommand("copy");
-    document.body.removeChild(ta);
+    sel.removeAllRanges();
+    document.body.removeChild(div);
     return { ok: true, mode: "fallback" };
   } catch (e) {
     return { ok: false, reason: String(e) };
@@ -142,10 +149,15 @@ function htmlToMarkdown(html) {
         case "h4": out.push({ t: "h", v: txt, n: 4 }); break;
         case "p": out.push({ t: "p", v: inline(child) }); break;
         case "blockquote": out.push({ t: "quote", v: inline(child) }); break;
-        case "pre": out.push({ t: "code", v: child.textContent.replace(/\n$/, "") }); break;
+        case "pre": {
+          const codeEl = child.querySelector ? child.querySelector("code") : null;
+          const lm = ((codeEl && codeEl.getAttribute("class")) || "").match(/language-([\w-]+)/);
+          out.push({ t: "code", v: child.textContent.replace(/\n$/, ""), lang: lm ? lm[1] : "" });
+          break;
+        }
         case "ul": out.push({ t: "list", v: listItems(child), ordered: false }); break;
         case "ol": out.push({ t: "list", v: listItems(child), ordered: true }); break;
-        case "hr": out.push({ t: "hr" }); break;
+        case "hr": out.push({ t: "hr", v: child.classList && child.classList.contains("page-break") ? "+++" : null }); break;
         case "table": out.push({ t: "table", v: tableToMd(child) }); break;
         case "img": out.push({ t: "img", v: child.getAttribute("src"), alt: child.getAttribute("alt") || "" }); break;
         case "br": out.push({ t: "br" }); break;
@@ -161,11 +173,17 @@ function htmlToMarkdown(html) {
       if (c.nodeType === 3) s += c.textContent;
       else if (c.nodeType === 1) {
         const tg = c.tagName.toLowerCase();
+        if (c.classList && c.classList.contains("task-box")) return; // 复选框由列表层统一处理
         const inner = inline(c);
         if (tg === "strong" || tg === "b") s += `**${inner}**`;
         else if (tg === "em" || tg === "i") s += `*${inner}*`;
+        else if (tg === "mark") s += `==${inner}==`;
+        else if (tg === "s" || tg === "del" || tg === "strike") s += `~~${inner}~~`;
+        else if (tg === "sup") s += `^${inner}^`;
+        else if (tg === "sub") s += `~${inner}~`;
         else if (tg === "code") s += "`" + c.textContent + "`";
         else if (tg === "a") s += `[${inner}](${c.getAttribute("href") || ""})`;
+        else if (tg === "img") s += `![${c.getAttribute("alt") || ""}](${c.getAttribute("src") || ""})`;
         else if (tg === "br") s += "\n";
         else s += inner;
       }
@@ -175,7 +193,15 @@ function htmlToMarkdown(html) {
   function listItems(ul) {
     const items = [];
     ul.childNodes.forEach((li) => {
-      if (li.nodeType === 1 && li.tagName.toLowerCase() === "li") items.push(inline(li));
+      if (li.nodeType === 1 && li.tagName.toLowerCase() === "li") {
+        const box = li.querySelector ? li.querySelector(".task-box") : null;
+        if (box) {
+          const checked = li.getAttribute("data-checked") === "true" || /☑|✓|\[x\]/i.test(box.textContent || "");
+          items.push({ task: true, checked: checked, v: inline(li) });
+        } else {
+          items.push({ task: false, v: inline(li) });
+        }
+      }
     });
     return items;
   }
@@ -206,11 +232,16 @@ function render(blocks) {
       case "h": lines.push("#".repeat(b.n) + " " + b.v); lines.push(""); break;
       case "p": lines.push(b.v); lines.push(""); break;
       case "quote": lines.push("> " + b.v); lines.push(""); break;
-      case "code": lines.push("```\n" + b.v + "\n```"); lines.push(""); break;
+      case "code": lines.push("```" + (b.lang || "") + "\n" + b.v + "\n```"); lines.push(""); break;
       case "list":
-        b.v.forEach((it, i) => lines.push((b.ordered ? (i + 1) + ". " : "- ") + it));
+        b.v.forEach((it, i) => {
+          const marker = b.ordered ? (i + 1) + ". " : "- ";
+          const task = it && it.task ? "[" + (it.checked ? "x" : " ") + "] " : "";
+          const val = it && typeof it === "object" ? it.v : it;
+          lines.push(marker + task + val);
+        });
         lines.push(""); break;
-      case "hr": lines.push("---"); lines.push(""); break;
+      case "hr": lines.push(b.v || "---"); lines.push(""); break;
       case "table": lines.push(b.v); lines.push(""); break;
       case "img": lines.push(`![${b.alt}](${b.v})`); lines.push(""); break;
       case "br": lines.push(""); break;
